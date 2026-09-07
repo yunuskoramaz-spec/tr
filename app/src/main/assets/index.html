@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Türkiye 81 İl</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif}header{padding:18px 16px 10px}h1{margin:0;font-size:24px}p{margin:5px 0;color:#94a3b8;font-size:13px}.toolbar{padding:8px 16px;display:flex;gap:8px}input{flex:1;padding:12px;border:1px solid #334155;border-radius:12px;background:#1e293b;color:#fff;font-size:15px}button{border:0;border-radius:12px;padding:0 14px;background:#334155;color:#fff;font-weight:700}.layout{display:flex;flex-direction:column;height:calc(100vh - 105px)}.mapbox{flex:1;min-height:45vh;padding:8px 12px;display:flex;align-items:center;justify-content:center}.mapbox svg{width:100%;height:auto;max-height:50vh}.turkey [data-city-name]{cursor:pointer;transition:.15s}.turkey [data-city-name] path{fill:#475569!important;stroke:#cbd5e1;stroke-width:1;vector-effect:non-scaling-stroke}.turkey [data-city-name]:hover path{fill:#64748b!important}.turkey [data-city-name].selected path{fill:#e11d48!important}.list{background:#111827;border-top:1px solid #334155;border-radius:20px 20px 0 0;padding:14px 16px;max-height:43vh;overflow:auto}.count{display:flex;justify-content:space-between;margin-bottom:10px;font-weight:700}.cities{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.city{padding:10px;border:1px solid #334155;border-radius:10px;background:#1e293b}.city.sel{background:#9f1239;border-color:#e11d48}.empty{color:#94a3b8;text-align:center;padding:20px}.credit{font-size:10px;color:#64748b;text-align:center;margin-top:10px}
+</style></head>
+<body>
+<header><h1>🇹🇷 Türkiye 81 İl</h1><p>Haritadan veya listeden şehirlere dokunarak seçim yap.</p></header>
+<div class="toolbar"><input id="search" placeholder="Şehir ara..." autocomplete="off"><button id="clear">Temizle</button></div>
+<div class="layout"><div class="mapbox" id="map"><div class="empty">Harita yükleniyor...</div></div><section class="list"><div class="count"><span>Şehirler</span><span id="selectedCount">0 / 81 seçili</span></div><div class="cities" id="cities"></div><div class="credit">Harita: Ali Han / Turkey-SVG-Map (MIT)</div></section></div>
+<script>
+const SVG_URL='https://raw.githubusercontent.com/ali-han/Turkey-SVG-Map/main/src/turkey.svg';
+const selected=new Set(); let groups=[];
+const esc=s=>s.replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+function sync(){document.getElementById('selectedCount').textContent=`${selected.size} / 81 seçili`;groups.forEach(g=>{const code=g.dataset.cityCode;g.classList.toggle('selected',selected.has(code));});renderList();}
+function toggle(g){const c=g.dataset.cityCode;selected.has(c)?selected.delete(c):selected.add(c);sync();}
+function renderList(){const q=document.getElementById('search').value.trim().toLocaleLowerCase('tr-TR');const box=document.getElementById('cities');box.innerHTML='';groups.filter(g=>g.dataset.cityName.toLocaleLowerCase('tr-TR').includes(q)).sort((a,b)=>a.dataset.cityName.localeCompare(b.dataset.cityName,'tr')).forEach(g=>{const b=document.createElement('button');b.className='city'+(selected.has(g.dataset.cityCode)?' sel':'');b.textContent=g.dataset.cityName;b.onclick=()=>toggle(g);box.appendChild(b);});}
+async function load(){try{const r=await fetch(SVG_URL);const text=await r.text();document.getElementById('map').innerHTML=text;groups=[...document.querySelectorAll('#svg-turkey [data-city-name]')];groups.forEach(g=>g.addEventListener('click',()=>toggle(g)));renderList();}catch(e){document.getElementById('map').innerHTML='<div class="empty">Harita yüklenemedi. İnternet bağlantısını kontrol et.</div>';}}
+document.getElementById('search').addEventListener('input',renderList);document.getElementById('clear').onclick=()=>{selected.clear();sync()};load();
+</script></body></html>
