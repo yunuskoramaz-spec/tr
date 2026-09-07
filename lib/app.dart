@@ -5,8 +5,8 @@ import 'features/search/address_search_page.dart';
 import 'features/duty/duty_page.dart';
 import 'features/places/place_category_page.dart';
 
-class KayseriKuryeApp extends StatelessWidget {
-  const KayseriKuryeApp({super.key});
+class KayseriRehberApp extends StatelessWidget {
+  const KayseriRehberApp({super.key});
 
   @override
   Widget build(BuildContext context) {
