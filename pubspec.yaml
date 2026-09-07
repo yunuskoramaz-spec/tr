@@ -1,0 +1,22 @@
+name: kayseri_kurye
+description: Kayseri Kurye - Kayseri adres ve kurye POI uygulaması
+publish_to: "none"
+version: 0.1.0+1
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  go_router: ^16.0.0
+  flutter_map: ^8.2.1
+  latlong2: ^0.9.1
+  http: ^1.5.0
+  intl: ^0.20.2
+  shared_preferences: ^2.5.3
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
