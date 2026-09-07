@@ -15,14 +15,12 @@ class KayseriKuryeApp extends StatelessWidget {
         GoRoute(path: '/', builder: (_, __) => const HomePage()),
         GoRoute(path: '/adres', builder: (_, __) => const AddressSearchPage()),
         GoRoute(path: '/nobet', builder: (_, __) => const DutyPage()),
-        GoRoute(
-          path: '/kategori/:type',
-          builder: (_, state) => PlaceCategoryPage(type: state.pathParameters['type']!),
-        ),
+        GoRoute(path: '/kategori/:type', builder: (_, state) => PlaceCategoryPage(type: state.pathParameters['type']!)),
       ],
     );
+
     return MaterialApp.router(
-      title: 'Kayseri Kurye',
+      title: 'Kayseri Rehber',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
