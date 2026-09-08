@@ -12,48 +12,41 @@ class PlaceCategoryPage extends StatefulWidget {
 }
 
 class _PlaceCategoryPageState extends State<PlaceCategoryPage> {
-  static const red = Color(0xFFFF4650);
   static const bg = Color(0xFF08131C);
   static const panel = Color(0xFF14232D);
+  static const red = Color(0xFFFF4650);
   static const teal = Color(0xFF2DBF9E);
   final service = PlaceSearchService();
-  final search = TextEditingController();
+  final controller = TextEditingController();
   List<PlaceResult> results = const [];
   bool loading = false;
-  bool map = false;
+  bool mapView = false;
   String? error;
 
-  static const defs = <String, ({String title, IconData icon})>{
-    'eczane': (title: 'Eczaneler', icon: Icons.local_pharmacy_outlined),
-    'noter': (title: 'Noterler', icon: Icons.description_outlined),
-    'hastane': (title: 'Hastaneler', icon: Icons.local_hospital_outlined),
-    'taksi': (title: 'Taksi Durakları', icon: Icons.local_taxi_outlined),
-    'cami': (title: 'Camiler', icon: Icons.mosque_outlined),
-    'benzin': (title: 'Akaryakıt', icon: Icons.local_gas_station_outlined),
-    'market': (title: 'Marketler', icon: Icons.shopping_cart_outlined),
-    'firin': (title: 'Fırınlar', icon: Icons.bakery_dining_outlined),
-    'restoran': (title: 'Restoranlar', icon: Icons.restaurant_outlined),
-    'kafe': (title: 'Kafeler', icon: Icons.local_cafe_outlined),
-    'oto-servis': (title: 'Oto Servis', icon: Icons.build_outlined),
-    'site': (title: 'Siteler / Konut', icon: Icons.apartment_outlined),
+  static const titles = <String, String>{
+    'eczane':'Eczaneler','noter':'Noterler','hastane':'Hastaneler','taksi':'Taksi Durakları',
+    'cami':'Camiler','benzin':'Akaryakıt','market':'Marketler','firin':'Fırınlar',
+    'restoran':'Restoranlar','kafe':'Kafeler','oto-servis':'Oto Servis','site':'Siteler / Konut',
   };
 
-  @override
-  void initState() { super.initState(); WidgetsBinding.instance.addPostFrameCallback((_) => load()); }
-  @override
-  void dispose() { search.dispose(); super.dispose(); }
+  static const icons = <String, IconData>{
+    'eczane':Icons.local_pharmacy_outlined,'noter':Icons.description_outlined,'hastane':Icons.local_hospital_outlined,
+    'taksi':Icons.local_taxi_outlined,'cami':Icons.mosque_outlined,'benzin':Icons.local_gas_station_outlined,
+    'market':Icons.shopping_cart_outlined,'firin':Icons.bakery_dining_outlined,'restoran':Icons.restaurant_outlined,
+    'kafe':Icons.local_cafe_outlined,'oto-servis':Icons.build_outlined,'site':Icons.apartment_outlined,
+  };
+
+  @override void initState() { super.initState(); WidgetsBinding.instance.addPostFrameCallback((_) => load()); }
+  @override void dispose() { controller.dispose(); super.dispose(); }
 
   Future<void> load() async {
-    if (!mounted) return;
     setState(() { loading = true; error = null; });
     try {
-      final data = await service.search(search.text.trim(), category: widget.type);
+      final data = await service.search(controller.text.trim(), category: widget.type);
       if (mounted) setState(() => results = data);
     } catch (e) {
       if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
+    } finally { if (mounted) setState(() => loading = false); }
   }
 
   Future<void> directions(PlaceResult p) async {
@@ -62,73 +55,59 @@ class _PlaceCategoryPageState extends State<PlaceCategoryPage> {
   }
 
   Future<void> call(PlaceResult p) async {
-    if (p.phone == null) return;
-    final phone = p.phone!.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (phone.isNotEmpty) await launchUrl(Uri.parse('tel:$phone'), mode: LaunchMode.externalApplication);
+    final phone = p.phone;
+    if (phone == null) return;
+    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (clean.isNotEmpty) await launchUrl(Uri.parse('tel:$clean'), mode: LaunchMode.externalApplication);
   }
 
   @override
   Widget build(BuildContext context) {
-    final d = defs[widget.type] ?? (title: 'Yerler', icon: Icons.place_outlined);
+    final title = titles[widget.type] ?? 'Yerler';
+    final icon = icons[widget.type] ?? Icons.place_outlined;
     return Scaffold(
       backgroundColor: bg,
-      appBar: AppBar(
-        backgroundColor: bg,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: Text(d.title, style: const TextStyle(fontWeight: FontWeight.w800)),
-        leading: IconButton(onPressed: () => context.pop(), icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20)),
-      ),
+      appBar: AppBar(backgroundColor: bg, foregroundColor: Colors.white, title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)), leading: IconButton(onPressed: () => context.pop(), icon: const Icon(Icons.arrow_back_ios_new_rounded))),
       body: Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-          child: TextField(
-            controller: search,
-            onSubmitted: (_) => load(),
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'İlçe, mahalle veya isim ara',
-              hintStyle: const TextStyle(color: Color(0xFF8EA0AC)),
-              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF9FB0BC)),
-              suffixIcon: IconButton(onPressed: load, icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white)),
-              filled: true, fillColor: panel,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            Expanded(child: _Mode(active: !map, text: 'Liste', icon: Icons.list_alt_rounded, onTap: () => setState(() => map = false))),
-            const SizedBox(width: 8),
-            Expanded(child: _Mode(active: map, text: 'Harita', icon: Icons.map_outlined, onTap: () => setState(() => map = true))),
-          ]),
-        ),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 10), child: TextField(controller: controller, onSubmitted: (_) => load(), style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: 'İlçe, mahalle veya isim ara', prefixIcon: const Icon(Icons.search_rounded), suffixIcon: IconButton(onPressed: load, icon: const Icon(Icons.search_rounded)), filled: true, fillColor: panel, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)))),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [
+          Expanded(child: _Mode(active: !mapView, label: 'Liste', icon: Icons.list_alt_rounded, onTap: () => setState(() => mapView = false))),
+          const SizedBox(width: 8),
+          Expanded(child: _Mode(active: mapView, label: 'Harita', icon: Icons.map_outlined, onTap: () => setState(() => mapView = true))),
+        ])),
         const SizedBox(height: 8),
-        Expanded(child: loading ? const Center(child: CircularProgressIndicator(color: red)) : error != null ? _Error(message: error!, retry: load) : map ? _Map(results: results, icon: d.icon, onDirections: directions) : results.isEmpty ? _Empty(retry: load) : ListView.builder(padding: const EdgeInsets.fromLTRB(16, 6, 16, 30), itemCount: results.length, itemBuilder: (_, i) => _Card(place: results[i], icon: d.icon, onDirections: () => directions(results[i]), onCall: () => call(results[i])))),
+        Expanded(child: loading ? const Center(child: CircularProgressIndicator(color: red)) : error != null ? _Error(message: error!, retry: load) : mapView ? _Map(results: results, icon: icon, onDirections: directions) : results.isEmpty ? _Empty(retry: load) : ListView.builder(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), itemCount: results.length, itemBuilder: (_, i) => _PlaceCard(place: results[i], icon: icon, directions: () => directions(results[i]), call: () => call(results[i])))),
       ]),
     );
   }
 }
 
 class _Mode extends StatelessWidget {
-  const _Mode({required this.active, required this.text, required this.icon, required this.onTap});
-  final bool active; final String text; final IconData icon; final VoidCallback onTap;
-  @override Widget build(BuildContext context) => Material(color: active ? const Color(0xFFFF4650) : const Color(0xFF14232D), borderRadius: BorderRadius.circular(14), child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: active ? Colors.white : const Color(0xFF9FB0BC), size: 20), const SizedBox(width: 7), Text(text, style: TextStyle(color: active ? Colors.white : const Color(0xFF9FB0BC), fontWeight: FontWeight.w800))]))));
+  const _Mode({required this.active, required this.label, required this.icon, required this.onTap});
+  final bool active; final String label; final IconData icon; final VoidCallback onTap;
+  @override Widget build(BuildContext c) => Material(color: active ? const Color(0xFFFF4650) : const Color(0xFF14232D), borderRadius: BorderRadius.circular(14), child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, size: 20, color: active ? Colors.white : const Color(0xFF9FB0BC)), const SizedBox(width: 7), Text(label, style: TextStyle(color: active ? Colors.white : const Color(0xFF9FB0BC), fontWeight: FontWeight.w800))]))));
 }
 
-class _Card extends StatelessWidget {
-  const _Card({required this.place, required this.icon, required this.onDirections, required this.onCall});
-  final PlaceResult place; final IconData icon; final VoidCallback onDirections; final VoidCallback onCall;
-  @override Widget build(BuildContext context) => Card(color: const Color(0xFF14232D), margin: const EdgeInsets.only(bottom: 10), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)), child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Container(width: 46, height: 46, decoration: BoxDecoration(color: const Color(0xFF21343F), borderRadius: BorderRadius.circular(13)), child: Icon(icon, color: const Color(0xFF2DBF9E))), const SizedBox(width: 11), Expanded(child: Text(place.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800)))]), const SizedBox(height: 11), Text(place.address, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF9FB0BC), height: 1.3)), if (place.phone != null) ...[const SizedBox(height: 7), Text(place.phone!, style: const TextStyle(color: Color(0xFF9FB0BC)))], const SizedBox(height: 12), Row(children: [if (place.phone != null) Expanded(child: FilledButton.icon(onPressed: onCall, icon: const Icon(Icons.call, size: 18), label: const Text('Ara'), style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2DBF9E)))), if (place.phone != null) const SizedBox(width: 8), Expanded(child: OutlinedButton.icon(onPressed: onDirections, icon: const Icon(Icons.directions_outlined, size: 18), label: const Text('Yol Tarifi'), style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF516572)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))))]))));
+class _PlaceCard extends StatelessWidget {
+  const _PlaceCard({required this.place, required this.icon, required this.directions, required this.call});
+  final PlaceResult place; final IconData icon; final VoidCallback directions; final VoidCallback call;
+  @override Widget build(BuildContext c) => Card(color: const Color(0xFF14232D), margin: const EdgeInsets.only(bottom: 10), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)), child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Row(children: [Container(width: 46, height: 46, decoration: BoxDecoration(color: const Color(0xFF21343F), borderRadius: BorderRadius.circular(13)), child: Icon(icon, color: const Color(0xFF2DBF9E))), const SizedBox(width: 11), Expanded(child: Text(place.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800)))]),
+    const SizedBox(height: 10), Text(place.address, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF9FB0BC), height: 1.3)),
+    if (place.phone != null) ...[const SizedBox(height: 6), Text(place.phone!, style: const TextStyle(color: Color(0xFF9FB0BC)))],
+    const SizedBox(height: 12), Row(children: [if (place.phone != null) ...[Expanded(child: FilledButton.icon(onPressed: call, icon: const Icon(Icons.call, size: 18), label: const Text('Ara'), style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2DBF9E)))), const SizedBox(width: 8)], Expanded(child: OutlinedButton.icon(onPressed: directions, icon: const Icon(Icons.directions_outlined, size: 18), label: const Text('Yol Tarifi'), style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF526775)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))))])
+  ])));
 }
 
 class _Map extends StatelessWidget {
   const _Map({required this.results, required this.icon, required this.onDirections});
   final List<PlaceResult> results; final IconData icon; final Future<void> Function(PlaceResult) onDirections;
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext c) {
     final center = results.isEmpty ? const LatLng(38.7225, 35.4875) : LatLng(results.first.lat, results.first.lon);
-    return FlutterMap(options: MapOptions(initialCenter: center, initialZoom: results.isEmpty ? 11 : 13), children: [TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.kayserirehber.app'), MarkerLayer(markers: results.map((p) => Marker(point: LatLng(p.lat, p.lon), width: 46, height: 46, child: GestureDetector(onTap: () => onDirections(p), child: Container(decoration: BoxDecoration(color: const Color(0xFFFF4650), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Icon(icon, color: Colors.white, size: 22))))).toList())]);
+    return FlutterMap(options: MapOptions(initialCenter: center, initialZoom: results.isEmpty ? 11 : 13), children: [
+      TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.kayserirehber.app'),
+      MarkerLayer(markers: results.map((p) => Marker(point: LatLng(p.lat, p.lon), width: 46, height: 46, child: GestureDetector(onTap: () => onDirections(p), child: Container(decoration: BoxDecoration(color: const Color(0xFFFF4650), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), child: Icon(icon, color: Colors.white, size: 22))))).toList()),
+    ]);
   }
 }
 
