@@ -15,7 +15,6 @@ class _PlaceCategoryPageState extends State<PlaceCategoryPage> {
   static const bg = Color(0xFF08131C);
   static const panel = Color(0xFF14232D);
   static const red = Color(0xFFFF4650);
-  static const teal = Color(0xFF2DBF9E);
   final service = PlaceSearchService();
   final controller = TextEditingController();
   List<PlaceResult> results = const [];
