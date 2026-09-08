@@ -14,38 +14,23 @@ class KayseriRehberApp extends StatelessWidget {
       GoRoute(path: '/', builder: (_, __) => const HomePage()),
       GoRoute(path: '/adres', builder: (_, __) => const AddressSearchPage()),
       GoRoute(path: '/nobet', builder: (_, __) => const DutyPage()),
-      GoRoute(
-        path: '/kategori/:type',
-        builder: (_, state) => PlaceCategoryPage(type: state.pathParameters['type']!),
-      ),
+      GoRoute(path: '/kategori/:type', builder: (_, state) => PlaceCategoryPage(type: state.pathParameters['type']!)),
     ],
   );
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'Kayseri Rehber',
-      debugShowCheckedModeBanner: false,
-      routerConfig: _router,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF26B99A),
-          brightness: Brightness.light,
+  Widget build(BuildContext context) => MaterialApp.router(
+        title: 'Kayseri Rehber',
+        debugShowCheckedModeBanner: false,
+        routerConfig: _router,
+        theme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.dark,
+          scaffoldBackgroundColor: const Color(0xFF08131C),
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF4650), brightness: Brightness.dark),
+          appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF08131C), foregroundColor: Colors.white, elevation: 0, surfaceTintColor: Colors.transparent),
+          cardTheme: const CardThemeData(color: Color(0xFF14232D), surfaceTintColor: Colors.transparent, elevation: 0),
+          inputDecorationTheme: InputDecorationTheme(filled: true, fillColor: Color(0xFF14232D), hintStyle: TextStyle(color: Color(0xFF8EA0AC)), border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(15)), borderSide: BorderSide.none)),
         ),
-        scaffoldBackgroundColor: Colors.white,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: false,
-        ),
-        cardTheme: const CardThemeData(
-          color: Colors.white,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-        ),
-      ),
-    );
-  }
+      );
 }
