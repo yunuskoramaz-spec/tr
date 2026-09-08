@@ -35,11 +35,7 @@ class PlaceSearchService {
   Future<List<PlaceResult>> search(String query, {String? category}) async {
     final trimmed = query.trim();
     if (category == null && trimmed.length < 2) return const [];
-
-    if (category != null) {
-      return _searchPoi(trimmed, category);
-    }
-
+    if (category != null) return _searchPoi(trimmed, category);
     return _searchAddress(trimmed);
   }
 
@@ -136,7 +132,7 @@ out center tags;
       case 'market':
         return '["shop"~"^(supermarket|convenience|department_store|mall)$"]$nameFilter';
       case 'noter':
-        return '["name"~"noter",i]';
+        return '["name"~"noter",i]$nameFilter';
       case 'eczane':
         return '["amenity"="pharmacy"]$nameFilter';
       case 'hastane':
