@@ -21,10 +21,7 @@ class PlaceResult {
 }
 
 /// Kayseri'deki POI ve adres verilerini canlı kaynaklardan getirir.
-///
-/// POI: OpenStreetMap Overpass. Kategori sorguları artık sabit 60 kayıtla
-/// kesilmez. Kullanıcı araması isim yanında adres/mahalle/ilçe alanlarında da
-/// eşleşir. Adres: Nominatim, ardından Overpass fallback.
+/// POI verileri OpenStreetMap Overpass'tan kategori bazında alınır.
 class PlaceSearchService {
   static const _nominatim = 'https://nominatim.openstreetmap.org/search';
   static const _overpass = 'https://overpass-api.de/api/interpreter';
@@ -60,33 +57,17 @@ class PlaceSearchService {
     String text,
     String category,
   ) async {
-    final escaped = RegExp.escape(text);
     final categoryFilter = _categoryFilter(category);
 
-    // Arama metni varsa isim, sokak, mahalle, ilçe ve şehir alanlarında ara.
-    // Metin boşsa kategorideki tüm kayıtları getir.
-    final locationFilters = text.isEmpty
-        ? ''
-        : '''
-      ["name"~"$escaped",i]
-''';
-
-    final query = text.isEmpty
-        ? '''
+    // Önce kategorinin tamamını getiriyoruz. Böylece "Melikgazi", mahalle,
+    // sokak veya işletme adı araması yalnızca OSM'nin name alanına bağlı kalmaz.
+    // Filtreleme aşağıda name + adres alanlarında yapılır.
+    final query = '''
 [out:json][timeout:60];
 (
   node($_kayseriBbox)$categoryFilter;
   way($_kayseriBbox)$categoryFilter;
   relation($_kayseriBbox)$categoryFilter;
-);
-out center tags;
-'''
-        : '''
-[out:json][timeout:60];
-(
-  node($_kayseriBbox)$categoryFilter$locationFilters;
-  way($_kayseriBbox)$categoryFilter$locationFilters;
-  relation($_kayseriBbox)$categoryFilter$locationFilters;
 );
 out center tags;
 ''';
@@ -148,8 +129,6 @@ out center tags;
       );
     }
 
-    // Burada artık take(60) gibi yapay bir kesme yok. Overpass'ın döndürdüğü
-    // bütün isimli kayıtlar uygulamaya aktarılır.
     return results;
   }
 
@@ -190,8 +169,8 @@ out center tags;
     String address,
     Map<String, dynamic> tags,
   ) {
-    final needle = text.toLowerCase();
-    final searchable = <String>[
+    final needle = _normalize(text);
+    final searchable = _normalize(<String>[
       name,
       address,
       tags['addr:street']?.toString() ?? '',
@@ -199,8 +178,26 @@ out center tags;
       tags['addr:suburb']?.toString() ?? '',
       tags['addr:district']?.toString() ?? '',
       tags['addr:city']?.toString() ?? '',
-    ].join(' ').toLowerCase();
+    ].join(' '));
     return searchable.contains(needle);
+  }
+
+  String _normalize(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('ı', 'i')
+        .replaceAll('İ', 'i')
+        .replaceAll('ş', 's')
+        .replaceAll('Ş', 's')
+        .replaceAll('ğ', 'g')
+        .replaceAll('Ğ', 'g')
+        .replaceAll('ü', 'u')
+        .replaceAll('Ü', 'u')
+        .replaceAll('ö', 'o')
+        .replaceAll('Ö', 'o')
+        .replaceAll('ç', 'c')
+        .replaceAll('Ç', 'c')
+        .trim();
   }
 
   String _categoryLabel(String category) {
