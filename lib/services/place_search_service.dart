@@ -20,8 +20,11 @@ class PlaceResult {
   final String? phone;
 }
 
-/// Real address and POI data for Kayseri.
-/// POIs use Overpass/OpenStreetMap, addresses use Nominatim with an Overpass fallback.
+/// Kayseri'deki POI ve adres verilerini canlı kaynaklardan getirir.
+///
+/// POI: OpenStreetMap Overpass. Kategori sorguları artık sabit 60 kayıtla
+/// kesilmez. Kullanıcı araması isim yanında adres/mahalle/ilçe alanlarında da
+/// eşleşir. Adres: Nominatim, ardından Overpass fallback.
 class PlaceSearchService {
   static const _nominatim = 'https://nominatim.openstreetmap.org/search';
   static const _overpass = 'https://overpass-api.de/api/interpreter';
@@ -44,7 +47,7 @@ class PlaceSearchService {
       final results = await _searchOverpass(text, category);
       if (results.isNotEmpty) return results;
     } catch (_) {
-      // Nominatim fallback is used below.
+      // Nominatim fallback below.
     }
 
     final fallbackQuery = text.isEmpty
@@ -58,13 +61,32 @@ class PlaceSearchService {
     String category,
   ) async {
     final escaped = RegExp.escape(text);
-    final filters = _filtersFor(category, escaped);
-    final query = '''
-[out:json][timeout:20];
+    final categoryFilter = _categoryFilter(category);
+
+    // Arama metni varsa isim, sokak, mahalle, ilçe ve şehir alanlarında ara.
+    // Metin boşsa kategorideki tüm kayıtları getir.
+    final locationFilters = text.isEmpty
+        ? ''
+        : '''
+      ["name"~"$escaped",i]
+''';
+
+    final query = text.isEmpty
+        ? '''
+[out:json][timeout:60];
 (
-  node($_kayseriBbox)$filters;
-  way($_kayseriBbox)$filters;
-  relation($_kayseriBbox)$filters;
+  node($_kayseriBbox)$categoryFilter;
+  way($_kayseriBbox)$categoryFilter;
+  relation($_kayseriBbox)$categoryFilter;
+);
+out center tags;
+'''
+        : '''
+[out:json][timeout:60];
+(
+  node($_kayseriBbox)$categoryFilter$locationFilters;
+  way($_kayseriBbox)$categoryFilter$locationFilters;
+  relation($_kayseriBbox)$categoryFilter$locationFilters;
 );
 out center tags;
 ''';
@@ -78,7 +100,7 @@ out center tags;
           },
           body: {'data': query},
         )
-        .timeout(const Duration(seconds: 25));
+        .timeout(const Duration(seconds: 70));
 
     if (response.statusCode != 200) {
       throw Exception('Yer servisi ${response.statusCode} döndürdü.');
@@ -106,13 +128,18 @@ out center tags;
       ]);
       if (name == null) continue;
 
-      final key = '${name.toLowerCase()}|$lat|$lon';
+      final address = _addressFromTags(tags, name);
+      if (text.isNotEmpty && !_matchesText(text, name, address, tags)) {
+        continue;
+      }
+
+      final key = '${name.toLowerCase()}|${lat.toStringAsFixed(6)}|${lon.toStringAsFixed(6)}';
       if (!seen.add(key)) continue;
 
       results.add(
         PlaceResult(
           name: name,
-          address: _addressFromTags(tags, name),
+          address: address,
           lat: lat,
           lon: lon,
           type: tags['amenity']?.toString() ?? tags['shop']?.toString(),
@@ -121,39 +148,59 @@ out center tags;
       );
     }
 
-    return results.take(60).toList();
+    // Burada artık take(60) gibi yapay bir kesme yok. Overpass'ın döndürdüğü
+    // bütün isimli kayıtlar uygulamaya aktarılır.
+    return results;
   }
 
-  String _filtersFor(String category, String escaped) {
-    final nameFilter = escaped.isEmpty ? '' : '["name"~"$escaped",i]';
+  String _categoryFilter(String category) {
     switch (category) {
       case 'benzin':
-        return '["amenity"="fuel"]$nameFilter';
+        return '["amenity"="fuel"]';
       case 'market':
-        return '["shop"~"^(supermarket|convenience|department_store|mall)"]$nameFilter';
+        return '["shop"~"^(supermarket|convenience|department_store|mall)$"]';
       case 'noter':
-        return '["name"~"noter",i]$nameFilter';
+        return '["name"~"noter",i]';
       case 'eczane':
-        return '["amenity"="pharmacy"]$nameFilter';
+        return '["amenity"="pharmacy"]';
       case 'hastane':
-        return '["amenity"="hospital"]$nameFilter';
+        return '["amenity"="hospital"]';
       case 'taksi':
-        return '["amenity"="taxi"]$nameFilter';
+        return '["amenity"="taxi"]';
       case 'cami':
-        return '["amenity"="place_of_worship"]["religion"="muslim"]$nameFilter';
+        return '["amenity"="place_of_worship"]["religion"="muslim"]';
       case 'firin':
-        return '["shop"="bakery"]$nameFilter';
+        return '["shop"="bakery"]';
       case 'restoran':
-        return '["amenity"="restaurant"]$nameFilter';
+        return '["amenity"="restaurant"]';
       case 'kafe':
-        return '["amenity"="cafe"]$nameFilter';
+        return '["amenity"="cafe"]';
       case 'oto-servis':
-        return '["shop"="car_repair"]$nameFilter';
+        return '["shop"="car_repair"]';
       case 'site':
-        return '["building"]["name"]$nameFilter';
+        return '["building"]["name"]';
       default:
-        return '["name"~"$escaped",i]';
+        return '';
     }
+  }
+
+  bool _matchesText(
+    String text,
+    String name,
+    String address,
+    Map<String, dynamic> tags,
+  ) {
+    final needle = text.toLowerCase();
+    final searchable = <String>[
+      name,
+      address,
+      tags['addr:street']?.toString() ?? '',
+      tags['addr:neighbourhood']?.toString() ?? '',
+      tags['addr:suburb']?.toString() ?? '',
+      tags['addr:district']?.toString() ?? '',
+      tags['addr:city']?.toString() ?? '',
+    ].join(' ').toLowerCase();
+    return searchable.contains(needle);
   }
 
   String _categoryLabel(String category) {
@@ -186,13 +233,12 @@ out center tags;
       try {
         final found = await _searchNominatim(query);
         for (final item in found) {
-          final key = '${item.name.toLowerCase()}|${item.lat}|${item.lon}';
+          final key = '${item.name.toLowerCase()}|${item.lat.toStringAsFixed(6)}|${item.lon.toStringAsFixed(6)}';
           if (seen.add(key)) all.add(item);
         }
       } catch (_) {
-        // Try the second variant and then Overpass below.
+        // Try next variant, then Overpass fallback.
       }
-      if (all.length >= 20) break;
     }
 
     if (all.isEmpty) {
@@ -203,7 +249,7 @@ out center tags;
       }
     }
 
-    return all.take(20).toList();
+    return all;
   }
 
   Future<List<PlaceResult>> _searchNominatim(String query) async {
@@ -211,7 +257,7 @@ out center tags;
       queryParameters: {
         'q': query,
         'format': 'jsonv2',
-        'limit': '20',
+        'limit': '50',
         'addressdetails': '1',
         'countrycodes': 'tr',
         'accept-language': 'tr',
@@ -220,7 +266,7 @@ out center tags;
 
     final response = await http
         .get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
       throw Exception('Adres servisine ulaşılamadı (${response.statusCode}).');
@@ -272,8 +318,8 @@ out center tags;
 
   String? _firstNonEmpty(Iterable<dynamic> values) {
     for (final value in values) {
-      final text = value?.toString().trim();
-      if (text != null && text.isNotEmpty) return text;
+      final valueText = value?.toString().trim();
+      if (valueText != null && valueText.isNotEmpty) return valueText;
     }
     return null;
   }
