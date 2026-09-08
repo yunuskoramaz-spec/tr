@@ -130,7 +130,7 @@ out center tags;
       case 'benzin':
         return '["amenity"="fuel"]$nameFilter';
       case 'market':
-        return '["shop"~"^(supermarket|convenience|department_store|mall)$"]$nameFilter';
+        return '["shop"~"^(supermarket|convenience|department_store|mall)"]$nameFilter';
       case 'noter':
         return '["name"~"noter",i]$nameFilter';
       case 'eczane':
