@@ -21,7 +21,7 @@ class PlaceResult {
 }
 
 /// Real address and POI data for Kayseri.
-/// POIs use Overpass/OpenStreetMap, addresses use Nominatim.
+/// POIs use Overpass/OpenStreetMap, addresses use Nominatim with an Overpass fallback.
 class PlaceSearchService {
   static const _nominatim = 'https://nominatim.openstreetmap.org/search';
   static const _overpass = 'https://overpass-api.de/api/interpreter';
@@ -183,13 +183,26 @@ out center tags;
     final all = <PlaceResult>[];
 
     for (final query in variants) {
-      final found = await _searchNominatim(query);
-      for (final item in found) {
-        final key = '${item.name.toLowerCase()}|${item.lat}|${item.lon}';
-        if (seen.add(key)) all.add(item);
+      try {
+        final found = await _searchNominatim(query);
+        for (final item in found) {
+          final key = '${item.name.toLowerCase()}|${item.lat}|${item.lon}';
+          if (seen.add(key)) all.add(item);
+        }
+      } catch (_) {
+        // Try the second variant and then Overpass below.
       }
       if (all.length >= 20) break;
     }
+
+    if (all.isEmpty) {
+      try {
+        return await _searchOverpass(text, 'address');
+      } catch (_) {
+        return const [];
+      }
+    }
+
     return all.take(20).toList();
   }
 
