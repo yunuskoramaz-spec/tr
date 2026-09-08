@@ -28,6 +28,23 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Prepare resilient address data endpoints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lib/services/place_search_service.dart')
+          s = p.read_text()
+          s = s.replace(
+              "  static const _overpassUrl = 'https://overpass-api.de/api/interpreter';\n  static const _backupOverpassUrl = 'https://overpass.kumi.systems/api/interpreter';",
+              "  static const _overpassUrls = <String>[\n    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',\n    'https://overpass.private.coffee/api/interpreter',\n    'https://overpass-api.de/api/interpreter',\n    'https://z.overpass-api.de/api/interpreter',\n    'https://lz4.overpass-api.de/api/interpreter',\n  ];"
+          )
+          s = s.replace("[_overpassUrl, _backupOverpassUrl]", "_overpassUrls")
+          p.write_text(s)
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
       - name: Analyze app source
         run: flutter analyze lib --no-fatal-infos --no-fatal-warnings
 
