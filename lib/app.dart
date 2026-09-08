@@ -8,22 +8,43 @@ import 'features/places/place_category_page.dart';
 class KayseriRehberApp extends StatelessWidget {
   const KayseriRehberApp({super.key});
 
+  static final GoRouter _router = GoRouter(
+    initialLocation: '/',
+    routes: [
+      GoRoute(path: '/', builder: (_, __) => const HomePage()),
+      GoRoute(path: '/adres', builder: (_, __) => const AddressSearchPage()),
+      GoRoute(path: '/nobet', builder: (_, __) => const DutyPage()),
+      GoRoute(
+        path: '/kategori/:type',
+        builder: (_, state) => PlaceCategoryPage(type: state.pathParameters['type']!),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
-    final router=GoRouter(routes:[
-      GoRoute(path:'/',builder:(_,__)=>const HomePage()),
-      GoRoute(path:'/adres',builder:(_,__)=>const AddressSearchPage()),
-      GoRoute(path:'/nobet',builder:(_,__)=>const DutyPage()),
-      GoRoute(path:'/kategori/:type',builder:(_,state)=>PlaceCategoryPage(type:state.pathParameters['type']!)),
-    ]);
     return MaterialApp.router(
-      title:'Kayseri Rehber',debugShowCheckedModeBanner:false,routerConfig:router,
-      theme:ThemeData(
-        useMaterial3:true,
-        colorScheme:ColorScheme.fromSeed(seedColor:const Color(0xFF1565C0),brightness:Brightness.light),
-        scaffoldBackgroundColor:Colors.white,
-        appBarTheme:const AppBarTheme(backgroundColor:Colors.white,surfaceTintColor:Colors.transparent,elevation:0),
-        cardTheme:const CardThemeData(color:Colors.white,surfaceTintColor:Colors.transparent),
+      title: 'Kayseri Rehber',
+      debugShowCheckedModeBanner: false,
+      routerConfig: _router,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF26B99A),
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+        ),
+        cardTheme: const CardThemeData(
+          color: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+        ),
       ),
     );
   }
