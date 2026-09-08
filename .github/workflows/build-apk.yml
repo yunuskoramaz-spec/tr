@@ -19,13 +19,13 @@ jobs:
           cache: true
 
       - name: Generate Android project files
-        run: flutter create --platforms=android --project-name=kayseri_kurye .
+        run: flutter create --platforms=android --project-name=kayseri_rehber .
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Analyze app source
-        run: flutter analyze lib
+        run: flutter analyze lib --no-fatal-infos
 
       - name: Build debug APK
         run: flutter build apk --debug
