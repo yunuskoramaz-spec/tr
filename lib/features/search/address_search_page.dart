@@ -16,7 +16,6 @@ class _AddressSearchPageState extends State<AddressSearchPage> {
   static const bg = Color(0xFF08131C);
   static const panel = Color(0xFF14232D);
   static const red = Color(0xFFFF4650);
-  static const teal = Color(0xFF2DBF9E);
   final service = PlaceSearchService();
   final controller = TextEditingController();
   _Step step = _Step.district;
@@ -112,7 +111,7 @@ class _AddressSearchPageState extends State<AddressSearchPage> {
           if(loading) const Padding(padding:EdgeInsets.all(28),child:Center(child:CircularProgressIndicator(color:red))),
           if(!loading&&error!=null) _ErrorBox(text:error!,onRetry:retry),
           if(!loading&&error==null&&results.isNotEmpty) _CountBox(count:list.length,total:results.length,label:switch(step){_Step.neighborhood=>'mahalle',_Step.street=>'cadde / sokak',_Step.building=>'bina / işletme',_Step.district=>'ilçe'}),
-          if(!loading&&error==null&&results.isEmpty) const _Info(icon:Icons.search_off_rounded,text:'Bu bölüm için henüz veri bulunamadı. Veri kaynağına bağlı olarak bazı adresler OpenStreetMap'te kayıtlı olmayabilir.'),
+          if(!loading&&error==null&&results.isEmpty) const _Info(icon:Icons.search_off_rounded,text:'Bu bölüm için henüz veri bulunamadı. Veri kaynağına bağlı olarak bazı adresler OpenStreetMap\'te kayıtlı olmayabilir.'),
           ...list.map((p)=>_ResultTile(place:p,step:step,onTap:()=>step==_Step.neighborhood?selectNeighborhood(p):step==_Step.street?selectStreet(p):selectBuilding(p))),
           if(building!=null) ...[
             const SizedBox(height:8),
