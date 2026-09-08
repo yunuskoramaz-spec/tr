@@ -25,7 +25,13 @@ class PlaceResult {
 class PlaceSearchService {
   static const _nominatim = 'https://nominatim.openstreetmap.org/search';
   static const _overpass = 'https://overpass-api.de/api/interpreter';
-  static const _kayseriBbox = '38.25,35.05,39.05,36.20';
+
+  // Kayseri il sınırı için geniş kapsama alanı. Overpass yükünü azaltmak için
+  // aramalar 4 parçaya bölünür.
+  static const _south = 38.25;
+  static const _west = 35.05;
+  static const _north = 39.05;
+  static const _east = 36.20;
 
   static const _headers = {
     'User-Agent': 'KayseriRehber/1.0 (mobile app)',
@@ -58,75 +64,92 @@ class PlaceSearchService {
     String category,
   ) async {
     final categoryFilter = _categoryFilter(category);
+    if (categoryFilter.isEmpty) return const [];
 
-    // Önce kategorinin tamamını getiriyoruz. Böylece "Melikgazi", mahalle,
-    // sokak veya işletme adı araması yalnızca OSM'nin name alanına bağlı kalmaz.
-    // Filtreleme aşağıda name + adres alanlarında yapılır.
-    final query = '''
+    final seen = <String>{};
+    final results = <PlaceResult>[];
+
+    // 2x2 sorgu: tek dev Overpass isteği yerine daha küçük istekler kullanılır.
+    // Böylece Kayseri'nin geniş alanında timeout/yanıt boyutu problemi azalır.
+    final midLat = (_south + _north) / 2;
+    final midLon = (_west + _east) / 2;
+    final boxes = <List<double>>[
+      [_south, _west, midLat, midLon],
+      [_south, midLon, midLat, _east],
+      [midLat, _west, _north, midLon],
+      [midLat, midLon, _north, _east],
+    ];
+
+    for (final box in boxes) {
+      try {
+        final boxText = box.map((value) => value.toStringAsFixed(6)).join(',');
+        final query = '''
 [out:json][timeout:60];
 (
-  node($_kayseriBbox)$categoryFilter;
-  way($_kayseriBbox)$categoryFilter;
-  relation($_kayseriBbox)$categoryFilter;
+  node($boxText)$categoryFilter;
+  way($boxText)$categoryFilter;
+  relation($boxText)$categoryFilter;
 );
 out center tags;
 ''';
 
-    final response = await http
-        .post(
-          Uri.parse(_overpass),
-          headers: {
-            ..._headers,
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          },
-          body: {'data': query},
-        )
-        .timeout(const Duration(seconds: 70));
+        final response = await http
+            .post(
+              Uri.parse(_overpass),
+              headers: {
+                ..._headers,
+                'Content-Type':
+                    'application/x-www-form-urlencoded; charset=UTF-8',
+              },
+              body: {'data': query},
+            )
+            .timeout(const Duration(seconds: 70));
 
-    if (response.statusCode != 200) {
-      throw Exception('Yer servisi ${response.statusCode} döndürdü.');
-    }
+        if (response.statusCode != 200) continue;
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final elements = decoded['elements'] as List<dynamic>? ?? const [];
-    final seen = <String>{};
-    final results = <PlaceResult>[];
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        final elements = decoded['elements'] as List<dynamic>? ?? const [];
 
-    for (final raw in elements) {
-      final item = raw as Map<String, dynamic>;
-      final tags = (item['tags'] as Map<String, dynamic>?) ?? const {};
-      final center = item['center'] as Map<String, dynamic>?;
-      final lat = (item['lat'] as num?)?.toDouble() ??
-          (center?['lat'] as num?)?.toDouble();
-      final lon = (item['lon'] as num?)?.toDouble() ??
-          (center?['lon'] as num?)?.toDouble();
-      if (lat == null || lon == null) continue;
+        for (final raw in elements) {
+          final item = raw as Map<String, dynamic>;
+          final tags = (item['tags'] as Map<String, dynamic>?) ?? const {};
+          final center = item['center'] as Map<String, dynamic>?;
+          final lat = (item['lat'] as num?)?.toDouble() ??
+              (center?['lat'] as num?)?.toDouble();
+          final lon = (item['lon'] as num?)?.toDouble() ??
+              (center?['lon'] as num?)?.toDouble();
+          if (lat == null || lon == null) continue;
 
-      final name = _firstNonEmpty([
-        tags['name:tr'],
-        tags['name'],
-        tags['official_name'],
-      ]);
-      if (name == null) continue;
+          final name = _firstNonEmpty([
+            tags['name:tr'],
+            tags['name'],
+            tags['official_name'],
+          ]);
+          if (name == null) continue;
 
-      final address = _addressFromTags(tags, name);
-      if (text.isNotEmpty && !_matchesText(text, name, address, tags)) {
-        continue;
+          final address = _addressFromTags(tags, name);
+          if (text.isNotEmpty && !_matchesText(text, name, address, tags)) {
+            continue;
+          }
+
+          final key =
+              '${_normalize(name)}|${lat.toStringAsFixed(5)}|${lon.toStringAsFixed(5)}';
+          if (!seen.add(key)) continue;
+
+          results.add(
+            PlaceResult(
+              name: name,
+              address: address,
+              lat: lat,
+              lon: lon,
+              type: tags['amenity']?.toString() ?? tags['shop']?.toString(),
+              phone: _firstNonEmpty([tags['contact:phone'], tags['phone']]),
+            ),
+          );
+        }
+      } catch (_) {
+        // Bir kutu başarısız olsa bile diğer kutulardaki verileri kullan.
       }
-
-      final key = '${name.toLowerCase()}|${lat.toStringAsFixed(6)}|${lon.toStringAsFixed(6)}';
-      if (!seen.add(key)) continue;
-
-      results.add(
-        PlaceResult(
-          name: name,
-          address: address,
-          lat: lat,
-          lon: lon,
-          type: tags['amenity']?.toString() ?? tags['shop']?.toString(),
-          phone: _firstNonEmpty([tags['contact:phone'], tags['phone']]),
-        ),
-      );
     }
 
     return results;
@@ -137,7 +160,7 @@ out center tags;
       case 'benzin':
         return '["amenity"="fuel"]';
       case 'market':
-        return '["shop"~"^(supermarket|convenience|department_store|mall)$"]';
+        return '["shop"~"^(supermarket|convenience|department_store|mall)\$",i]';
       case 'noter':
         return '["name"~"noter",i]';
       case 'eczane':
@@ -174,10 +197,13 @@ out center tags;
       name,
       address,
       tags['addr:street']?.toString() ?? '',
+      tags['addr:housenumber']?.toString() ?? '',
       tags['addr:neighbourhood']?.toString() ?? '',
       tags['addr:suburb']?.toString() ?? '',
       tags['addr:district']?.toString() ?? '',
       tags['addr:city']?.toString() ?? '',
+      tags['addr:postcode']?.toString() ?? '',
+      tags['description']?.toString() ?? '',
     ].join(' '));
     return searchable.contains(needle);
   }
@@ -202,19 +228,32 @@ out center tags;
 
   String _categoryLabel(String category) {
     switch (category) {
-      case 'benzin': return 'benzin istasyonu';
-      case 'market': return 'market';
-      case 'noter': return 'noter';
-      case 'eczane': return 'eczane';
-      case 'hastane': return 'hastane';
-      case 'taksi': return 'taksi durağı';
-      case 'cami': return 'cami';
-      case 'firin': return 'fırın';
-      case 'restoran': return 'restoran';
-      case 'kafe': return 'kafe';
-      case 'oto-servis': return 'oto servis';
-      case 'site': return 'site';
-      default: return category;
+      case 'benzin':
+        return 'benzin istasyonu';
+      case 'market':
+        return 'market';
+      case 'noter':
+        return 'noter';
+      case 'eczane':
+        return 'eczane';
+      case 'hastane':
+        return 'hastane';
+      case 'taksi':
+        return 'taksi durağı';
+      case 'cami':
+        return 'cami';
+      case 'firin':
+        return 'fırın';
+      case 'restoran':
+        return 'restoran';
+      case 'kafe':
+        return 'kafe';
+      case 'oto-servis':
+        return 'oto servis';
+      case 'site':
+        return 'site';
+      default:
+        return category;
     }
   }
 
@@ -230,19 +269,12 @@ out center tags;
       try {
         final found = await _searchNominatim(query);
         for (final item in found) {
-          final key = '${item.name.toLowerCase()}|${item.lat.toStringAsFixed(6)}|${item.lon.toStringAsFixed(6)}';
+          final key =
+              '${_normalize(item.name)}|${item.lat.toStringAsFixed(6)}|${item.lon.toStringAsFixed(6)}';
           if (seen.add(key)) all.add(item);
         }
       } catch (_) {
-        // Try next variant, then Overpass fallback.
-      }
-    }
-
-    if (all.isEmpty) {
-      try {
-        return await _searchOverpass(text, 'address');
-      } catch (_) {
-        return const [];
+        // Try next variant.
       }
     }
 
@@ -306,7 +338,9 @@ out center tags;
 
     final parts = <String>[];
     if (street != null && street.isNotEmpty) {
-      parts.add(number == null || number.isEmpty ? street : '$street No: $number');
+      parts.add(
+        number == null || number.isEmpty ? street : '$street No: $number',
+      );
     }
     if (neighborhood != null) parts.add(neighborhood);
     if (parts.isEmpty) return fallback;
