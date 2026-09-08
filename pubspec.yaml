@@ -1,7 +1,7 @@
-name: kayseri_kurye
-description: Kayseri'de adres ve önemli yerleri kolayca bulmak için şehir rehberi
+name: kayseri_rehber
+description: Kayseri'de adres, bina, işletme ve önemli noktaları bulmak için şehir rehberi
 publish_to: "none"
-version: 0.2.0+2
+version: 1.0.0+1
 environment:
   sdk: ">=3.6.0 <4.0.0"
 dependencies:
