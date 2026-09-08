@@ -25,8 +25,17 @@ jobs:
       - name: Generate Android project files
         run: flutter create --platforms=android --project-name=kayseri_rehber .
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Enable Android network access
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android.permission.INTERNET' not in s:
+              marker = '<application'
+              s = s.replace(marker, '    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n\n    ' + marker, 1)
+              p.write_text(s)
+          PY
 
       - name: Prepare resilient address data endpoints
         run: |
