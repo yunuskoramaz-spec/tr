@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -21,8 +20,8 @@ class PlaceResult {
   final String? phone;
 }
 
-/// Kayseri adres ve POI verilerini canlı, ücretsiz açık harita kaynaklarından getirir.
-/// Ağ sorunlarında tek bir sunucuya bağımlı kalmamak için Overpass yedekleri kullanılır.
+/// Kayseri adres ve POI verilerini canlı açık harita kaynaklarından getirir.
+/// Birden fazla Overpass sunucusu kullanır ve sonuçları kısa süreli bellekte tutar.
 class PlaceSearchService {
   static const _nominatim = 'https://nominatim.openstreetmap.org/search';
   static const _overpassEndpoints = <String>[
@@ -46,30 +45,41 @@ class PlaceSearchService {
     final text = query.trim();
     if (category == null && text.length < 2) return const [];
 
-    final cacheKey = '${category ?? 'address'}|${_normalize(text)}';
-    final cached = _cache[cacheKey];
+    final key = '${category ?? 'address'}|${_normalize(text)}';
+    final cached = _cache[key];
     if (cached != null) return cached;
 
     final result = category == null
         ? await _searchAddress(text)
         : await _searchPoi(text, category);
-    _cache[cacheKey] = result;
+    _cache[key] = result;
     return result;
   }
 
   Future<List<PlaceResult>> _searchPoi(String text, String category) async {
-    try {
-      final results = await _searchOverpass(text, category);
-      if (results.isNotEmpty) return results;
-    } catch (_) {}
+    List<PlaceResult> results = const [];
+    for (final endpoint in _overpassEndpoints) {
+      try {
+        results = await _searchOverpass(endpoint, text, category);
+        if (results.isNotEmpty) return results;
+      } catch (_) {}
+    }
 
     final fallback = text.isEmpty
         ? '${_categoryLabel(category)}, Kayseri, Türkiye'
         : '$text, ${_categoryLabel(category)}, Kayseri, Türkiye';
-    return _searchNominatim(fallback);
+    try {
+      return await _searchNominatim(fallback);
+    } catch (_) {
+      return const [];
+    }
   }
 
-  Future<List<PlaceResult>> _searchOverpass(String text, String category) async {
+  Future<List<PlaceResult>> _searchOverpass(
+    String endpoint,
+    String text,
+    String category,
+  ) async {
     final filter = _categoryFilter(category);
     if (filter.isEmpty) return const [];
 
@@ -82,13 +92,9 @@ class PlaceSearchService {
       [midLat, midLon, _north, _east],
     ];
 
-    // Dört bölgeyi paralel sorgulamak, önceki sürümdeki 4 x 70 saniyeye varabilen
-    // seri beklemeyi ortadan kaldırır. İlk başarılı endpoint kullanılır.
-    final endpoint = await _findWorkingOverpassEndpoint();
-    if (endpoint == null) throw Exception('Harita veri sunucularına ulaşılamadı.');
-
-    final futures = boxes.map((box) => _queryBox(endpoint, box, filter));
-    final chunks = await Future.wait(futures);
+    final chunks = await Future.wait(
+      boxes.map((box) => _queryBox(endpoint, box, filter)),
+    );
     final seen = <String>{};
     final results = <PlaceResult>[];
 
@@ -104,23 +110,11 @@ class PlaceSearchService {
     return results.take(250).toList(growable: false);
   }
 
-  Future<String?> _findWorkingOverpassEndpoint() async {
-    for (final endpoint in _overpassEndpoints) {
-      try {
-        final response = await http
-            .post(
-              Uri.parse(endpoint),
-              headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
-              body: const {'data': '[out:json][timeout:5];node(38.72,35.48,38.73,35.50);out 1;'},
-            )
-            .timeout(const Duration(seconds: 8));
-        if (response.statusCode == 200) return endpoint;
-      } catch (_) {}
-    }
-    return null;
-  }
-
-  Future<List<PlaceResult>> _queryBox(String endpoint, List<double> box, String filter) async {
+  Future<List<PlaceResult>> _queryBox(
+    String endpoint,
+    List<double> box,
+    String filter,
+  ) async {
     final boxText = box.map((v) => v.toStringAsFixed(6)).join(',');
     final query = '''
 [out:json][timeout:25];
@@ -132,21 +126,21 @@ class PlaceSearchService {
 out center tags;
 ''';
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse(endpoint),
-            headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
-            body: {'data': query},
-          )
-          .timeout(const Duration(seconds: 32));
-      if (response.statusCode != 200) return const [];
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final elements = decoded['elements'] as List<dynamic>? ?? const [];
-      return elements.map(_parseOverpass).whereType<PlaceResult>().toList();
-    } catch (_) {
-      return const [];
-    }
+    final response = await http
+        .post(
+          Uri.parse(endpoint),
+          headers: {
+            ..._headers,
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          },
+          body: {'data': query},
+        )
+        .timeout(const Duration(seconds: 32));
+
+    if (response.statusCode != 200) return const [];
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final elements = decoded['elements'] as List<dynamic>? ?? const [];
+    return elements.map(_parseOverpass).whereType<PlaceResult>().toList();
   }
 
   PlaceResult? _parseOverpass(dynamic raw) {
@@ -175,15 +169,15 @@ out center tags;
       case 'benzin':
         return '["amenity"="fuel"]';
       case 'market':
-        return '[("shop"~"^(supermarket|convenience|department_store|mall)$",i)]';
+        return '["shop"~"^(supermarket|convenience|department_store|mall)$",i]';
       case 'noter':
-        return '[("office"="notary")["name"~"noter",i]]';
+        return '["office"="notary"]';
       case 'eczane':
         return '["amenity"="pharmacy"]';
       case 'hastane':
         return '["amenity"="hospital"]';
       case 'taksi':
-        return '[("amenity"="taxi")["name"]]';
+        return '["amenity"="taxi"]';
       case 'cami':
         return '["amenity"="place_of_worship"]["religion"="muslim"]';
       case 'firin':
@@ -203,15 +197,11 @@ out center tags;
 
   bool _matchesText(String text, PlaceResult place) {
     final needle = _normalize(text);
-    final searchable = _normalize('${place.name} ${place.address}');
-    return searchable.contains(needle);
+    return _normalize('${place.name} ${place.address}').contains(needle);
   }
 
   Future<List<PlaceResult>> _searchAddress(String text) async {
-    final queries = <String>[
-      '$text, Kayseri, Türkiye',
-      '$text, Kayseri, Turkey',
-    ];
+    final queries = <String>['$text, Kayseri, Türkiye', '$text, Kayseri, Turkey'];
     final seen = <String>{};
     final all = <PlaceResult>[];
 
@@ -268,9 +258,15 @@ out center tags;
   String _addressFromTags(Map<String, dynamic> tags, String fallback) {
     final street = tags['addr:street']?.toString();
     final number = tags['addr:housenumber']?.toString();
-    final neighborhood = _firstNonEmpty([tags['addr:neighbourhood'], tags['addr:suburb'], tags['addr:district']]);
+    final neighborhood = _firstNonEmpty([
+      tags['addr:neighbourhood'],
+      tags['addr:suburb'],
+      tags['addr:district'],
+    ]);
     final parts = <String>[];
-    if (street != null && street.isNotEmpty) parts.add(number == null || number.isEmpty ? street : '$street No: $number');
+    if (street != null && street.isNotEmpty) {
+      parts.add(number == null || number.isEmpty ? street : '$street No: $number');
+    }
     if (neighborhood != null) parts.add(neighborhood);
     return parts.isEmpty ? fallback : '${parts.join(', ')}, Kayseri';
   }
