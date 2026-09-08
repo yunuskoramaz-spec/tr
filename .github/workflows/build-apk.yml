@@ -5,6 +5,10 @@ on:
     branches: [ main, 'fix/**' ]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,12 +31,12 @@ jobs:
       - name: Analyze app source
         run: flutter analyze lib --no-fatal-infos
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build release APK
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kayseri-rehber-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: kayseri-rehber-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
