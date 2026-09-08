@@ -30,6 +30,60 @@ class PlaceSearchService {
     return result;
   }
 
+  Future<List<PlaceResult>> searchNeighborhoods(String district) async {
+    return _hierarchy('neighborhoods|${_normalize(district)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter",i];);out center tags;''', (p) => true);
+  }
+
+  Future<List<PlaceResult>> searchStreets(String district, String neighborhood) async {
+    return _hierarchy('streets|${_normalize(district)}|${_normalize(neighborhood)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;way(area.a)["highway"]["name"];out center tags;''', (p) => _matchesNeighborhood(p, neighborhood));
+  }
+
+  Future<List<PlaceResult>> searchStreetPlaces(String district, String neighborhood, String street) async {
+    final cacheKey = 'places|${_normalize(district)}|${_normalize(neighborhood)}|${_normalize(street)}';
+    final cached = _cache[cacheKey];
+    if (cached != null) return cached;
+    final streetName = _escape(street);
+    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;way(area.a)["highway"]["name"="$streetName"]->.s;(nwr(around.s:35)["name"];nwr(around.s:35)["addr:housenumber"];);out center tags;''';
+    final raw = await _runOverpass(query);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where((p) => _matchesNeighborhood(p, neighborhood)).where((p) => _matchesStreet(p, street)).toList())
+      ..sort(_compareNames);
+    final result = out.take(500).toList(growable: false);
+    _cache[cacheKey] = result;
+    return result;
+  }
+
+  Future<List<PlaceResult>> _hierarchy(String key, String query, bool Function(PlaceResult) keep) async {
+    final cached = _cache[key];
+    if (cached != null) return cached;
+    final raw = await _runOverpass(query);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where(keep).toList())..sort(_compareNames);
+    final result = out.take(1000).toList(growable: false);
+    _cache[key] = result;
+    return result;
+  }
+
+  Future<List<dynamic>> _runOverpass(String query) async {
+    for (final endpoint in [_overpassUrl, _backupOverpassUrl]) {
+      try {
+        final response = await http.post(Uri.parse(endpoint), headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded'}, body: {'data': '[out:json][timeout:60];$query'}).timeout(const Duration(seconds: 70));
+        if (response.statusCode != 200) continue;
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        return decoded['elements'] as List<dynamic>? ?? const [];
+      } catch (_) {}
+    }
+    throw Exception('Adres verileri alınamadı. İnternet bağlantısını ve veri servisini kontrol edin.');
+  }
+
+  bool _matchesNeighborhood(PlaceResult p, String neighborhood) {
+    final q = _normalize(neighborhood);
+    return _normalize('${p.name} ${p.address}').contains(q) || _normalize(p.address).contains(q);
+  }
+
+  bool _matchesStreet(PlaceResult p, String street) {
+    final q = _normalize(street);
+    return _normalize('${p.name} ${p.address}').contains(q);
+  }
+
   Future<List<PlaceResult>> _searchPoi(String text, String category) async {
     final filter = _filter(category);
     if (filter.isEmpty) return const [];
@@ -49,7 +103,7 @@ class PlaceSearchService {
           final id = '${_normalize(p.name)}|${p.lat.toStringAsFixed(5)}|${p.lon.toStringAsFixed(5)}';
           if (seen.add(id)) results.add(p);
         }
-        results.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        results.sort(_compareNames);
         if (results.isNotEmpty) return results.take(250).toList(growable: false);
       } catch (_) {}
     }
@@ -80,9 +134,9 @@ class PlaceSearchService {
     final center = item['center'] as Map<String, dynamic>?;
     final lat = (item['lat'] as num?)?.toDouble() ?? (center?['lat'] as num?)?.toDouble();
     final lon = (item['lon'] as num?)?.toDouble() ?? (center?['lon'] as num?)?.toDouble();
-    final name = _first([tags['name:tr'], tags['name'], tags['official_name']]);
+    final name = _first([tags['name:tr'], tags['name'], tags['official_name'], tags['addr:housenumber']]);
     if (lat == null || lon == null || name == null) return null;
-    return PlaceResult(name: name, address: _address(tags, name), lat: lat, lon: lon, type: _first([tags['amenity'], tags['shop'], tags['office'], tags['craft']]), phone: _first([tags['contact:phone'], tags['phone']]));
+    return PlaceResult(name: name, address: _address(tags, name), lat: lat, lon: lon, type: _first([tags['amenity'], tags['shop'], tags['office'], tags['building'], tags['craft']]), phone: _first([tags['contact:phone'], tags['phone']]));
   }
 
   Future<List<PlaceResult>> _searchAddress(String text) async {
@@ -121,6 +175,13 @@ class PlaceSearchService {
     return parts.isEmpty ? fallback : '${parts.join(', ')}, Kayseri';
   }
 
+  List<PlaceResult> _dedupe(List<PlaceResult> input) {
+    final seen = <String>{};
+    return input.where((p) => seen.add('${_normalize(p.name)}|${p.lat.toStringAsFixed(5)}|${p.lon.toStringAsFixed(5)}')).toList();
+  }
+
+  int _compareNames(PlaceResult a, PlaceResult b) => _normalize(a.name).compareTo(_normalize(b.name));
+  String _escape(String v) => v.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
   String _normalize(String v) => v.toLowerCase().replaceAll('ı','i').replaceAll('ş','s').replaceAll('ğ','g').replaceAll('ü','u').replaceAll('ö','o').replaceAll('ç','c').replaceAll('İ','i').replaceAll('Ş','s').replaceAll('Ğ','g').replaceAll('Ü','u').replaceAll('Ö','o').replaceAll('Ç','c').trim();
   String _label(String c) => const {'eczane':'eczane','hastane':'hastane','taksi':'taksi durağı','cami':'cami','benzin':'benzin istasyonu','market':'market','firin':'fırın','restoran':'restoran','kafe':'kafe','oto-servis':'oto servis','site':'site','noter':'noter'}[c] ?? c;
   String? _first(Iterable<dynamic> values) { for (final v in values) { final s = v?.toString().trim(); if (s != null && s.isNotEmpty) return s; } return null; }
