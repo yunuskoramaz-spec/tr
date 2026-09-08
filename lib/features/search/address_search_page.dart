@@ -1,120 +1,113 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/place_search_service.dart';
+
+enum _Step { district, neighborhood, street, building }
 
 class AddressSearchPage extends StatefulWidget {
   const AddressSearchPage({super.key});
   @override State<AddressSearchPage> createState() => _AddressSearchPageState();
 }
 
-enum _AddressStep { district, neighborhood, street, building }
-
 class _AddressSearchPageState extends State<AddressSearchPage> {
+  static const bg = Color(0xFF08131C);
+  static const panel = Color(0xFF14232D);
+  static const red = Color(0xFFFF4650);
+  static const teal = Color(0xFF2DBF9E);
   final service = PlaceSearchService();
   final controller = TextEditingController();
-  _AddressStep step = _AddressStep.district;
-  String? district, neighborhood, street;
+  _Step step = _Step.district;
+  String? district;
+  String? neighborhood;
+  String? street;
+  PlaceResult? building;
   List<PlaceResult> results = const [];
-  PlaceResult? selectedBuilding;
   bool loading = false;
   String? error;
 
   static const districts = ['Akkışla','Bünyan','Develi','Felahiye','Hacılar','İncesu','Kocasinan','Melikgazi','Özvatan','Pınarbaşı','Sarıoğlan','Sarız','Talas','Tomarza','Yahyalı','Yeşilhisar'];
 
-  String get stepTitle => switch (step) {
-    _AddressStep.district => 'İlçe seçin',
-    _AddressStep.neighborhood => 'Mahalle seçin',
-    _AddressStep.street => 'Cadde veya sokak seçin',
-    _AddressStep.building => 'Bina no veya bina adı',
-  };
-
-  String get stepHint => switch (step) {
-    _AddressStep.district => 'Önce adresin bulunduğu ilçeyi seçin.',
-    _AddressStep.neighborhood => '$district ilçesindeki mahalleyi arayın.',
-    _AddressStep.street => '$neighborhood mahallesindeki cadde veya sokağı arayın.',
-    _AddressStep.building => '$street üzerindeki bina numarası veya bina adını arayın.',
-  };
+  String get title => switch (step) { _Step.district => 'İlçe Seçin', _Step.neighborhood => 'Mahalle Seçin', _Step.street => 'Cadde / Sokak Seçin', _Step.building => 'Bina Seçin' };
+  String get hint => switch (step) { _Step.neighborhood => 'Mahalle ara...', _Step.street => 'Cadde veya sokak ara...', _Step.building => 'Bina no veya bina adı ara...', _Step.district => 'İlçe ara...' };
 
   @override void dispose() { controller.dispose(); super.dispose(); }
 
-  void chooseDistrict(String value) => setState(() {
-    district=value; neighborhood=null; street=null; selectedBuilding=null; results=const []; controller.clear(); step=_AddressStep.neighborhood;
-  });
+  void selectDistrict(String value) { setState(() { district=value; neighborhood=null; street=null; building=null; results=[]; controller.clear(); step=_Step.neighborhood; }); }
 
-  void choosePlace(PlaceResult place) => setState(() {
-    if (step == _AddressStep.neighborhood) { neighborhood=place.name; street=null; selectedBuilding=null; step=_AddressStep.street; }
-    else if (step == _AddressStep.street) { street=place.name; selectedBuilding=null; step=_AddressStep.building; }
-    else { selectedBuilding=place; }
-    results=const []; controller.clear();
-  });
-
-  Future<void> search() async {
-    if (step == _AddressStep.district || controller.text.trim().isEmpty) return;
-    FocusManager.instance.primaryFocus?.unfocus();
-    setState(() { loading=true; error=null; selectedBuilding=null; });
-    final text=controller.text.trim();
-    final query=switch (step) {
-      _AddressStep.neighborhood => '$text mahalle, $district',
-      _AddressStep.street => '$text, $neighborhood, $district',
-      _AddressStep.building => '$text, $street, $neighborhood, $district',
-      _AddressStep.district => text,
-    };
-    try { final found=await service.search(query); if (mounted) setState(() => results=found); }
-    catch(e) { if (mounted) setState(() => error=e.toString().replaceFirst('Exception: ','')); }
-    finally { if (mounted) setState(() => loading=false); }
-  }
-
-  void goBack() {
-    if (step == _AddressStep.district) { context.go('/'); return; }
+  void selectResult(PlaceResult p) {
     setState(() {
-      if (step == _AddressStep.building) {
-        step=_AddressStep.street;
-      } else if (step == _AddressStep.street) {
-        step=_AddressStep.neighborhood;
-        street=null;
-      } else {
-        step=_AddressStep.district;
-        neighborhood=null;
-      }
-      controller.clear(); results=const []; selectedBuilding=null; error=null;
+      if (step == _Step.neighborhood) { neighborhood=p.name; street=null; building=null; step=_Step.street; }
+      else if (step == _Step.street) { street=p.name; building=null; step=_Step.building; }
+      else if (step == _Step.building) { building=p; }
+      results=[]; controller.clear(); error=null;
     });
   }
 
-  Future<void> openMaps(PlaceResult place) async {
-    await launchUrl(Uri.parse('https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lon}'), mode: LaunchMode.externalApplication);
+  Future<void> search() async {
+    final text=controller.text.trim();
+    if (text.isEmpty || step == _Step.district) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() { loading=true; error=null; });
+    final query = switch (step) {
+      _Step.neighborhood => '$text mahalle, $district, Kayseri',
+      _Step.street => '$text, $neighborhood, $district, Kayseri',
+      _Step.building => '$text, $street, $neighborhood, $district, Kayseri',
+      _Step.district => text,
+    };
+    try {
+      final data=await service.search(query);
+      if (mounted) setState(() => results=data);
+    } catch(e) { if (mounted) setState(() => error=e.toString().replaceFirst('Exception: ','')); }
+    finally { if (mounted) setState(() => loading=false); }
   }
 
-  @override Widget build(BuildContext context) => PopScope(
-    canPop:false,
-    onPopInvokedWithResult:(didPop, result) { if (!didPop) goBack(); },
-    child: Scaffold(
-      backgroundColor: const Color(0xFFF7F9FC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,surfaceTintColor: Colors.transparent,title:const Text('Adres / Bina Bul',style:TextStyle(fontSize:26,fontWeight:FontWeight.w500)),
-        leading:IconButton(icon:const Icon(Icons.arrow_back,size:28),onPressed:goBack),
-        actions:[IconButton(tooltip:'Ana sayfa',icon:const Icon(Icons.home_outlined),onPressed:()=>context.go('/'))],
-      ),
-      body: ListView(padding:const EdgeInsets.fromLTRB(16,12,16,28),children:[
-        _Breadcrumb(district:district,neighborhood:neighborhood,street:street,step:step),const SizedBox(height:18),
-        Text(stepTitle,style:const TextStyle(fontSize:26,fontWeight:FontWeight.w700)),const SizedBox(height:6),Text(stepHint,style:const TextStyle(color:Color(0xFF637789),fontSize:15)),const SizedBox(height:16),
-        if(step==_AddressStep.district)...districts.map((x)=>_FolderTile(title:x,onTap:()=>chooseDistrict(x))) else ...[
-          TextField(controller:controller,textInputAction:TextInputAction.search,onSubmitted:(_)=>search(),decoration:InputDecoration(filled:true,fillColor:Colors.white,hintText:step==_AddressStep.building?'Örn. 16 veya bina adı':'Aramak için yazın',prefixIcon:const Icon(Icons.search),suffixIcon:IconButton(icon:const Icon(Icons.arrow_forward),onPressed:search),border:OutlineInputBorder(borderRadius:BorderRadius.circular(16),borderSide:BorderSide.none))),const SizedBox(height:12),
-          if(loading)const Padding(padding:EdgeInsets.all(24),child:Center(child:CircularProgressIndicator())),
-          if(error!=null)_MessageCard(icon:Icons.error_outline,text:error!),
-          if(!loading&&error==null&&results.isEmpty)const _MessageCard(icon:Icons.folder_open,text:'Arama yaparak bir sonraki klasörü açın.'),
-          if(selectedBuilding!=null)_MapCard(place:selectedBuilding!,onDirections:()=>openMaps(selectedBuilding!)),
-          ...results.map((p)=>_FolderResult(place:p,isBuilding:step==_AddressStep.building,onTap:()=>choosePlace(p))),
+  void back() {
+    if (step==_Step.district) { context.pop(); return; }
+    setState(() {
+      if (step==_Step.neighborhood) { step=_Step.district; district=null; }
+      else if (step==_Step.street) { step=_Step.neighborhood; neighborhood=null; }
+      else { step=_Step.street; building=null; }
+      controller.clear(); results=[]; error=null;
+    });
+  }
+
+  Future<void> maps(PlaceResult p) async {
+    final uri=Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override Widget build(BuildContext context) => Scaffold(
+    backgroundColor:bg,
+    appBar:AppBar(backgroundColor:bg,foregroundColor:Colors.white,title:Text(title,style:const TextStyle(fontWeight:FontWeight.w800)),leading:IconButton(onPressed:back,icon:const Icon(Icons.arrow_back_ios_new_rounded)),actions:[IconButton(onPressed:()=>context.go('/'),icon:const Icon(Icons.home_outlined))]),
+    body:ListView(padding:const EdgeInsets.fromLTRB(16,4,16,28),children:[
+      _Crumbs(district:district, neighborhood:neighborhood, street:street),
+      const SizedBox(height:14),
+      if(step==_Step.district) ...[
+        const Text('Adresin bulunduğu ilçeyi seçin',style:TextStyle(color:Color(0xFF9FB0BC))),
+        const SizedBox(height:12),
+        ...districts.map((d)=>_RowTile(text:d,onTap:()=>selectDistrict(d))),
+      ] else ...[
+        TextField(controller:controller,onSubmitted:(_)=>search(),style:const TextStyle(color:Colors.white),decoration:InputDecoration(hintText:hint,prefixIcon:const Icon(Icons.search_rounded),suffixIcon:IconButton(onPressed:search,icon:const Icon(Icons.arrow_forward_rounded)),filled:true,fillColor:panel,border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:BorderSide.none))),
+        const SizedBox(height:12),
+        if(loading) const Padding(padding:EdgeInsets.all(24),child:Center(child:CircularProgressIndicator(color:red))),
+        if(error!=null) _Info(icon:Icons.error_outline,text:error!),
+        if(!loading&&error==null&&results.isEmpty&&building==null) const _Info(icon:Icons.search_rounded,text:'Arama yaparak bir sonraki adımı açın.'),
+        ...results.map((p)=>_ResultTile(place:p,onTap:()=>selectResult(p))),
+        if(building!=null) ...[
+          const SizedBox(height:8),
+          _BuildingCard(place:building!,onDirections:()=>maps(building!)),
         ],
-      ]),
-    ),
+      ],
+    ]),
   );
 }
 
-class _Breadcrumb extends StatelessWidget{const _Breadcrumb({this.district,this.neighborhood,this.street,required this.step});final String? district,neighborhood,street;final _AddressStep step;@override Widget build(BuildContext c)=>Wrap(spacing:6,runSpacing:6,children:[const Icon(Icons.home_work_outlined,size:18),...[district,neighborhood,street,step==_AddressStep.building?'Bina':null].whereType<String>().map((x)=>Chip(label:Text(x),visualDensity:VisualDensity.compact))]);}
-class _FolderTile extends StatelessWidget{const _FolderTile({required this.title,required this.onTap});final String title;final VoidCallback onTap;@override Widget build(BuildContext c)=>Card(elevation:0,margin:const EdgeInsets.only(bottom:8),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14),side:BorderSide(color:Colors.grey.shade200)),child:ListTile(leading:const CircleAvatar(backgroundColor:Color(0xFFE8F8F4),child:Icon(Icons.folder_outlined,color:Color(0xFF2DBF9E))),title:Text(title,style:const TextStyle(fontWeight:FontWeight.w600)),trailing:const Icon(Icons.chevron_right),onTap:onTap));}
-class _FolderResult extends StatelessWidget{const _FolderResult({required this.place,required this.isBuilding,required this.onTap});final PlaceResult place;final bool isBuilding;final VoidCallback onTap;@override Widget build(BuildContext c)=>Card(elevation:0,margin:const EdgeInsets.only(bottom:8),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14),side:BorderSide(color:Colors.grey.shade200)),child:ListTile(leading:CircleAvatar(backgroundColor:const Color(0xFFE8F8F4),child:Icon(isBuilding?Icons.apartment:Icons.folder_outlined,color:const Color(0xFF2DBF9E))),title:Text(place.name,style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text(place.address,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.chevron_right),onTap:onTap));}
-class _MapCard extends StatelessWidget{const _MapCard({required this.place,required this.onDirections});final PlaceResult place;final VoidCallback onDirections;@override Widget build(BuildContext c){final p=LatLng(place.lat,place.lon);return Card(clipBehavior:Clip.antiAlias,child:Column(children:[SizedBox(height:220,child:FlutterMap(options:MapOptions(initialCenter:p,initialZoom:16),children:[TileLayer(urlTemplate:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',userAgentPackageName:'com.kayserirehber.app'),MarkerLayer(markers:[Marker(point:p,width:48,height:48,child:const Icon(Icons.location_pin,size:48,color:Color(0xFF2DBF9E)))])])),ListTile(title:Text(place.name),subtitle:Text(place.address,maxLines:2,overflow:TextOverflow.ellipsis),trailing:FilledButton.icon(onPressed:onDirections,icon:const Icon(Icons.directions),label:const Text('Yol Tarifi')))]));}}
-class _MessageCard extends StatelessWidget{const _MessageCard({required this.icon,required this.text});final IconData icon;final String text;@override Widget build(BuildContext c)=>Card(elevation:0,child:Padding(padding:const EdgeInsets.all(16),child:Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon),const SizedBox(width:12),Expanded(child:Text(text))])));}
+class _Crumbs extends StatelessWidget { const _Crumbs({this.district,this.neighborhood,this.street}); final String? district,neighborhood,street; @override Widget build(BuildContext c)=>Wrap(spacing:6,runSpacing:6,children:[const Icon(Icons.location_city_outlined,color:Color(0xFF9FB0BC),size:18),if(district!=null)_Chip(district!),if(neighborhood!=null)_Chip(neighborhood!),if(street!=null)_Chip(street!),const _Chip('Bina')]); }
+class _Chip extends StatelessWidget { const _Chip(this.text); final String text; @override Widget build(BuildContext c)=>Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:6),decoration:BoxDecoration(color:const Color(0xFF14232D),borderRadius:BorderRadius.circular(20)),child:Text(text,style:const TextStyle(color:Color(0xFFCBD5DB),fontSize:12,fontWeight:FontWeight.w700))); }
+class _RowTile extends StatelessWidget { const _RowTile({required this.text,required this.onTap}); final String text; final VoidCallback onTap; @override Widget build(BuildContext c)=>Card(color:const Color(0xFF14232D),margin:const EdgeInsets.only(bottom:7),elevation:0,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14)),child:ListTile(onTap:onTap,leading:const Icon(Icons.folder_open_rounded,color:Color(0xFF2DBF9E)),title:Text(text,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w700)),trailing:const Icon(Icons.chevron_right_rounded,color:Color(0xFF718491)))); }
+class _ResultTile extends StatelessWidget { const _ResultTile({required this.place,required this.onTap}); final PlaceResult place; final VoidCallback onTap; @override Widget build(BuildContext c)=>Card(color:const Color(0xFF14232D),margin:const EdgeInsets.only(bottom:7),elevation:0,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14)),child:ListTile(onTap:onTap,leading:const Icon(Icons.folder_outlined,color:Color(0xFF2DBF9E)),title:Text(place.name,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w700)),subtitle:Text(place.address,maxLines:2,overflow:TextOverflow.ellipsis,style:const TextStyle(color:Color(0xFF9FB0BC))),trailing:const Icon(Icons.chevron_right_rounded,color:Color(0xFF718491)))); }
+class _BuildingCard extends StatelessWidget { const _BuildingCard({required this.place,required this.onDirections}); final PlaceResult place; final VoidCallback onDirections; @override Widget build(BuildContext c){final p=LatLng(place.lat,place.lon);return Card(color:const Color(0xFF14232D),clipBehavior:Clip.antiAlias,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(18)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[SizedBox(height:210,child:FlutterMap(options:MapOptions(initialCenter:p,initialZoom:16),children:[TileLayer(urlTemplate:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',userAgentPackageName:'com.kayserirehber.app'),MarkerLayer(markers:[Marker(point:p,width:48,height:48,child:const Icon(Icons.location_pin,color:Color(0xFFFF4650),size:48))])])),Padding(padding:const EdgeInsets.all(15),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(place.name,style:const TextStyle(color:Colors.white,fontSize:19,fontWeight:FontWeight.w800)),const SizedBox(height:6),Text(place.address,style:const TextStyle(color:Color(0xFF9FB0BC),height:1.3)),const SizedBox(height:12),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:onDirections,icon:const Icon(Icons.navigation_rounded),label:const Text('Yol Tarifi'),style:FilledButton.styleFrom(backgroundColor:const Color(0xFFFF4650))))]))]));}}
+class _Info extends StatelessWidget { const _Info({required this.icon,required this.text}); final IconData icon; final String text; @override Widget build(BuildContext c)=>Card(color:const Color(0xFF14232D),child:Padding(padding:const EdgeInsets.all(14),child:Row(children:[Icon(icon,color:const Color(0xFF9FB0BC)),const SizedBox(width:10),Expanded(child:Text(text,style:const TextStyle(color:Color(0xFFCBD5DB))))]))); }
