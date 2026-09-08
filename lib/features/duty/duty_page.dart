@@ -43,12 +43,12 @@ class _DutyPageState extends State<DutyPage> {
       setState(() {
         error = e.toString().replaceFirst('Exception: ', '');
       });
-    } finally {
-      if (!mounted) return;
-      setState(() {
-        loading = false;
-      });
     }
+
+    if (!mounted) return;
+    setState(() {
+      loading = false;
+    });
   }
 
   Future<void> call(String phone) async {
