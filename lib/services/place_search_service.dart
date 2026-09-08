@@ -31,32 +31,38 @@ class PlaceSearchService {
   }
 
   Future<List<PlaceResult>> searchNeighborhoods(String district) async {
-    return _hierarchy('neighborhoods|${_normalize(district)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter",i];);out center tags;''', (p) => true);
+    return _hierarchy('neighborhoods|${_normalize(district)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter",i];);out center tags;''');
   }
 
   Future<List<PlaceResult>> searchStreets(String district, String neighborhood) async {
-    return _hierarchy('streets|${_normalize(district)}|${_normalize(neighborhood)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;way(area.a)["highway"]["name"];out center tags;''', (p) => _matchesNeighborhood(p, neighborhood));
+    final key = 'streets|${_normalize(district)}|${_normalize(neighborhood)}';
+    final cached = _cache[key];
+    if (cached != null) return cached;
+    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;nwr(area.a)["place"~"neighbourhood|suburb|quarter",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:1800)["highway"]["name"];out center tags;''';
+    final raw = await _runOverpass(query);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
+    final result = out.take(1000).toList(growable: false);
+    _cache[key] = result;
+    return result;
   }
 
   Future<List<PlaceResult>> searchStreetPlaces(String district, String neighborhood, String street) async {
     final cacheKey = 'places|${_normalize(district)}|${_normalize(neighborhood)}|${_normalize(street)}';
     final cached = _cache[cacheKey];
     if (cached != null) return cached;
-    final streetName = _escape(street);
-    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;way(area.a)["highway"]["name"="$streetName"]->.s;(nwr(around.s:35)["name"];nwr(around.s:35)["addr:housenumber"];);out center tags;''';
+    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;nwr(area.a)["place"~"neighbourhood|suburb|quarter",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:1800)["highway"]["name"="${_escape(street)}"]->.s;(nwr(around.s:45)["name"];nwr(around.s:45)["addr:housenumber"];);out center tags;''';
     final raw = await _runOverpass(query);
-    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where((p) => _matchesNeighborhood(p, neighborhood)).where((p) => _matchesStreet(p, street)).toList())
-      ..sort(_compareNames);
-    final result = out.take(500).toList(growable: false);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
+    final result = out.take(1000).toList(growable: false);
     _cache[cacheKey] = result;
     return result;
   }
 
-  Future<List<PlaceResult>> _hierarchy(String key, String query, bool Function(PlaceResult) keep) async {
+  Future<List<PlaceResult>> _hierarchy(String key, String query) async {
     final cached = _cache[key];
     if (cached != null) return cached;
     final raw = await _runOverpass(query);
-    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where(keep).toList())..sort(_compareNames);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
     final result = out.take(1000).toList(growable: false);
     _cache[key] = result;
     return result;
@@ -72,16 +78,6 @@ class PlaceSearchService {
       } catch (_) {}
     }
     throw Exception('Adres verileri alınamadı. İnternet bağlantısını ve veri servisini kontrol edin.');
-  }
-
-  bool _matchesNeighborhood(PlaceResult p, String neighborhood) {
-    final q = _normalize(neighborhood);
-    return _normalize('${p.name} ${p.address}').contains(q) || _normalize(p.address).contains(q);
-  }
-
-  bool _matchesStreet(PlaceResult p, String street) {
-    final q = _normalize(street);
-    return _normalize('${p.name} ${p.address}').contains(q);
   }
 
   Future<List<PlaceResult>> _searchPoi(String text, String category) async {
