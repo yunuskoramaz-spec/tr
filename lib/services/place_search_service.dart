@@ -15,9 +15,15 @@ class PlaceSearchService {
   static const _nominatimUrl = 'https://nominatim.openstreetmap.org/search';
   static const _overpassUrl = 'https://overpass-api.de/api/interpreter';
   static const _backupOverpassUrl = 'https://overpass.kumi.systems/api/interpreter';
-  static const _headers = {'User-Agent': 'KayseriRehber/1.0', 'Accept-Language': 'tr-TR,tr;q=0.9'};
+  static const _headers = {
+    'User-Agent': 'KayseriRehber/1.0 (address search)',
+    'Accept-Language': 'tr-TR,tr;q=0.9',
+    'Accept': 'application/json',
+    'Accept-Encoding': 'gzip, deflate',
+  };
   static const _bbox = '38.25,35.05,39.05,36.20';
   static final Map<String, List<PlaceResult>> _cache = {};
+  static final Map<String, int> _areaCache = {};
 
   Future<List<PlaceResult>> search(String query, {String? category}) async {
     final text = query.trim();
@@ -31,53 +37,130 @@ class PlaceSearchService {
   }
 
   Future<List<PlaceResult>> searchNeighborhoods(String district) async {
-    return _hierarchy('neighborhoods|${_normalize(district)}', '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter",i];);out center tags;''');
+    final key = 'neighborhoods|${_normalize(district)}';
+    final cached = _cache[key];
+    if (cached != null) return cached;
+
+    final areaId = await _resolveAreaId(district);
+    final queries = <String>[];
+    if (areaId != null) {
+      queries.add('rel($areaId);map_to_area->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter|village",i];);out center tags;');
+    }
+    queries.add('area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;(nwr(area.a)["place"~"neighbourhood|suburb|quarter|village",i];);out center tags;');
+
+    final raw = await _runFirstSuccessful(queries);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
+    final result = out.take(1000).toList(growable: false);
+    _cache[key] = result;
+    if (result.isEmpty) throw Exception('$district için mahalle verisi bulunamadı.');
+    return result;
   }
 
   Future<List<PlaceResult>> searchStreets(String district, String neighborhood) async {
     final key = 'streets|${_normalize(district)}|${_normalize(neighborhood)}';
     final cached = _cache[key];
     if (cached != null) return cached;
-    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;nwr(area.a)["place"~"neighbourhood|suburb|quarter",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:1800)["highway"]["name"];out center tags;''';
-    final raw = await _runOverpass(query);
-    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
-    final result = out.take(1000).toList(growable: false);
+
+    final districtArea = await _resolveAreaId(district);
+    final queries = <String>[];
+    if (districtArea != null) {
+      queries.add('rel($districtArea);map_to_area->.d;rel(area.d)["name"="${_escape(neighborhood)}"]->.n;map_to_area->.a;(way(area.a)["highway"]["name"];);out center tags;');
+      queries.add('rel($districtArea);map_to_area->.d;nwr(area.d)["place"~"neighbourhood|suburb|quarter|village",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:2500)["highway"]["name"];out center tags;');
+    }
+    queries.add('area["name"="${_escape(district)}"]["boundary"="administrative"]->.d;nwr(area.d)["place"~"neighbourhood|suburb|quarter|village",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:2500)["highway"]["name"];out center tags;');
+
+    final raw = await _runFirstSuccessful(queries);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where((p) => _isStreet(p)).toList())..sort(_compareNames);
+    final result = out.take(1500).toList(growable: false);
     _cache[key] = result;
+    if (result.isEmpty) throw Exception('$neighborhood için cadde/sokak verisi bulunamadı.');
     return result;
   }
 
   Future<List<PlaceResult>> searchStreetPlaces(String district, String neighborhood, String street) async {
-    final cacheKey = 'places|${_normalize(district)}|${_normalize(neighborhood)}|${_normalize(street)}';
-    final cached = _cache[cacheKey];
+    final key = 'places|${_normalize(district)}|${_normalize(neighborhood)}|${_normalize(street)}';
+    final cached = _cache[key];
     if (cached != null) return cached;
-    final query = '''area["name"="${_escape(district)}"]["boundary"="administrative"]->.a;nwr(area.a)["place"~"neighbourhood|suburb|quarter",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:1800)["highway"]["name"="${_escape(street)}"]->.s;(nwr(around.s:45)["name"];nwr(around.s:45)["addr:housenumber"];);out center tags;''';
-    final raw = await _runOverpass(query);
-    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
+
+    final queries = <String>[];
+    final districtArea = await _resolveAreaId(district);
+    if (districtArea != null) {
+      queries.add('rel($districtArea);map_to_area->.d;nwr(area.d)["place"~"neighbourhood|suburb|quarter|village",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:2500)["highway"]["name"="${_escape(street)}"]->.s;(nwr(around.s:90)["building"];nwr(around.s:90)["addr:housenumber"];nwr(around.s:90)["shop"];nwr(around.s:90)["amenity"];);out center tags;');
+    }
+    queries.add('area["name"="${_escape(district)}"]["boundary"="administrative"]->.d;nwr(area.d)["place"~"neighbourhood|suburb|quarter|village",i]["name"="${_escape(neighborhood)}"]->.n;way(around.n:2500)["highway"]["name"="${_escape(street)}"]->.s;(nwr(around.s:90)["building"];nwr(around.s:90)["addr:housenumber"];nwr(around.s:90)["shop"];nwr(around.s:90)["amenity"];);out center tags;');
+
+    final raw = await _runFirstSuccessful(queries);
+    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().where((p) => _isBuildingOrPlace(p)).toList())..sort(_compareBuildings);
     final result = out.take(1000).toList(growable: false);
-    _cache[cacheKey] = result;
+    _cache[key] = result;
+    if (result.isEmpty) throw Exception('$street için bina/işletme verisi bulunamadı.');
     return result;
   }
 
-  Future<List<PlaceResult>> _hierarchy(String key, String query) async {
-    final cached = _cache[key];
-    if (cached != null) return cached;
-    final raw = await _runOverpass(query);
-    final out = _dedupe(raw.map(_parse).whereType<PlaceResult>().toList())..sort(_compareNames);
-    final result = out.take(1000).toList(growable: false);
-    _cache[key] = result;
-    return result;
+  Future<List<dynamic>> _runFirstSuccessful(List<String> queries) async {
+    Exception? last;
+    for (final query in queries) {
+      try {
+        final result = await _runOverpass(query);
+        if (result.isNotEmpty) return result;
+      } catch (e) {
+        last = Exception(e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
+    if (last != null) throw last;
+    return const [];
   }
 
   Future<List<dynamic>> _runOverpass(String query) async {
+    Exception? last;
     for (final endpoint in [_overpassUrl, _backupOverpassUrl]) {
       try {
-        final response = await http.post(Uri.parse(endpoint), headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded'}, body: {'data': '[out:json][timeout:60];$query'}).timeout(const Duration(seconds: 70));
-        if (response.statusCode != 200) continue;
+        final response = await http.post(
+          Uri.parse(endpoint),
+          headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded'},
+          body: {'data': '[out:json][timeout:90];$query'},
+        ).timeout(const Duration(seconds: 100));
+        if (response.statusCode != 200) {
+          last = Exception('Adres veri servisi HTTP ${response.statusCode}');
+          continue;
+        }
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
         return decoded['elements'] as List<dynamic>? ?? const [];
-      } catch (_) {}
+      } catch (e) {
+        last = Exception(e.toString().replaceFirst('Exception: ', ''));
+      }
     }
-    throw Exception('Adres verileri alınamadı. İnternet bağlantısını ve veri servisini kontrol edin.');
+    throw last ?? Exception('Adres veri servisine ulaşılamadı.');
+  }
+
+  Future<int?> _resolveAreaId(String name) async {
+    final key = _normalize(name);
+    if (_areaCache.containsKey(key)) return _areaCache[key];
+    try {
+      final uri = Uri.parse(_nominatimUrl).replace(queryParameters: {
+        'q': '$name, Kayseri, Türkiye',
+        'format': 'jsonv2',
+        'limit': '8',
+        'addressdetails': '1',
+        'countrycodes': 'tr',
+        'accept-language': 'tr',
+      });
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body) as List<dynamic>;
+      for (final raw in data) {
+        final item = raw as Map<String, dynamic>;
+        if (item['osm_type']?.toString() != 'relation') continue;
+        final display = _normalize(item['display_name']?.toString() ?? '');
+        if (!display.contains('kayseri')) continue;
+        final id = int.tryParse(item['osm_id']?.toString() ?? '');
+        if (id != null) {
+          _areaCache[key] = id;
+          return id;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<List<PlaceResult>> _searchPoi(String text, String category) async {
@@ -85,13 +168,13 @@ class PlaceSearchService {
     if (filter.isEmpty) return const [];
     for (final endpoint in [_overpassUrl, _backupOverpassUrl]) {
       try {
-        final q = '[out:json][timeout:35];(node($_bbox)$filter;way($_bbox)$filter;relation($_bbox)$filter;);out center tags;';
-        final response = await http.post(Uri.parse(endpoint), headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded'}, body: {'data': q}).timeout(const Duration(seconds: 40));
+        final q = '[out:json][timeout:45];(node($_bbox)$filter;way($_bbox)$filter;relation($_bbox)$filter;);out center tags;';
+        final response = await http.post(Uri.parse(endpoint), headers: {..._headers, 'Content-Type': 'application/x-www-form-urlencoded'}, body: {'data': q}).timeout(const Duration(seconds: 55));
         if (response.statusCode != 200) continue;
         final decoded = jsonDecode(response.body) as Map<String, dynamic>;
         final elements = decoded['elements'] as List<dynamic>? ?? const [];
-        final seen = <String>{};
         final results = <PlaceResult>[];
+        final seen = <String>{};
         for (final raw in elements) {
           final p = _parse(raw);
           if (p == null) continue;
@@ -130,10 +213,13 @@ class PlaceSearchService {
     final center = item['center'] as Map<String, dynamic>?;
     final lat = (item['lat'] as num?)?.toDouble() ?? (center?['lat'] as num?)?.toDouble();
     final lon = (item['lon'] as num?)?.toDouble() ?? (center?['lon'] as num?)?.toDouble();
-    final name = _first([tags['name:tr'], tags['name'], tags['official_name'], tags['addr:housenumber']]);
+    final name = _first([tags['name:tr'], tags['name'], tags['official_name'], tags['addr:housenumber'], tags['addr:street']]);
     if (lat == null || lon == null || name == null) return null;
-    return PlaceResult(name: name, address: _address(tags, name), lat: lat, lon: lon, type: _first([tags['amenity'], tags['shop'], tags['office'], tags['building'], tags['craft']]), phone: _first([tags['contact:phone'], tags['phone']]));
+    return PlaceResult(name: name, address: _address(tags, name), lat: lat, lon: lon, type: _first([tags['amenity'], tags['shop'], tags['office'], tags['building'], tags['highway'], tags['craft']]), phone: _first([tags['contact:phone'], tags['phone']]));
   }
+
+  bool _isStreet(PlaceResult p) => const {'motorway','trunk','primary','secondary','tertiary','unclassified','residential','living_street','service','pedestrian','track','road','footway','path','cycleway'}.contains(p.type);
+  bool _isBuildingOrPlace(PlaceResult p) => p.type != null && (p.type == 'yes' || p.type == 'building' || p.type == 'house' || p.type == 'apartments' || p.type == 'residential' || p.type == 'commercial' || p.type == 'retail' || p.type == 'office' || p.type == 'shop' || p.type == 'restaurant' || p.type == 'cafe' || p.type == 'pharmacy' || p.address.contains('No:'));
 
   Future<List<PlaceResult>> _searchAddress(String text) async {
     final out = <PlaceResult>[];
@@ -177,6 +263,13 @@ class PlaceSearchService {
   }
 
   int _compareNames(PlaceResult a, PlaceResult b) => _normalize(a.name).compareTo(_normalize(b.name));
+  int _compareBuildings(PlaceResult a, PlaceResult b) {
+    final an = int.tryParse(RegExp(r'\d+').firstMatch(a.name)?.group(0) ?? '999999') ?? 999999;
+    final bn = int.tryParse(RegExp(r'\d+').firstMatch(b.name)?.group(0) ?? '999999') ?? 999999;
+    final c = an.compareTo(bn);
+    return c != 0 ? c : _compareNames(a, b);
+  }
+
   String _escape(String v) => v.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
   String _normalize(String v) => v.toLowerCase().replaceAll('ı','i').replaceAll('ş','s').replaceAll('ğ','g').replaceAll('ü','u').replaceAll('ö','o').replaceAll('ç','c').replaceAll('İ','i').replaceAll('Ş','s').replaceAll('Ğ','g').replaceAll('Ü','u').replaceAll('Ö','o').replaceAll('Ç','c').trim();
   String _label(String c) => const {'eczane':'eczane','hastane':'hastane','taksi':'taksi durağı','cami':'cami','benzin':'benzin istasyonu','market':'market','firin':'fırın','restoran':'restoran','kafe':'kafe','oto-servis':'oto servis','site':'site','noter':'noter'}[c] ?? c;
